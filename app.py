@@ -18,8 +18,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🍳 厨房调料管家 3.1")
-st.caption("视觉优化版：红黄预警、逻辑搜索、在线编辑 ✨")
+st.title("🍳 厨房调料管家 3.2")
+st.caption("视觉优化版：只在名称列进行精准红黄预警 ✨")
 
 # 2. 数据库与文件夹初始化
 DATA_FILE = "kitchen_data.csv"
@@ -50,22 +50,29 @@ def process_data(input_df):
         temp_df["生产日期"] = temp_df["生产日期"].dt.strftime("%Y-%m-%d")
         temp_df["到期日"] = temp_df["到期日"].dt.strftime("%Y-%m-%d")
         
-        # 3. 【优化】调整列顺序：让“剩余天数”排在“生产日期”右边
+        # 3. 调整列顺序
         new_order = ["调料名称", "生产日期", "剩余天数", "到期日", "保质期(月)", "存放位置", "分类", "照片路径"]
         temp_df = temp_df[new_order]
         
     return temp_df
 
-# --- 样式渲染函数 ---
+# --- 【全新优化】只给名称列上色的样式函数 ---
 def highlight_expiry(row):
+    # 先生成一个和列数一样长的“无颜色”列表
+    styles = [''] * len(row)
+    
+    # 获取“调料名称”这一列在表格里的排位索引
+    name_idx = row.index.get_loc('调料名称')
     days = row['剩余天数']
+    
     if days < 0:
-        # 已过期：红色背景，白色文字
-        return ['background-color: #ff4b4b; color: white'] * len(row)
+        # 已过期：只给名称这一格涂红色
+        styles[name_idx] = 'background-color: #ff4b4b; color: white'
     elif 0 <= days <= 30:
-        # 临期：黄色背景，黑色文字
-        return ['background-color: #f1c40f; color: black'] * len(row)
-    return [''] * len(row)
+        # 临期：只给名称这一格涂黄色
+        styles[name_idx] = 'background-color: #f1c40f; color: black'
+        
+    return styles
 
 # ----------------- Tab 1: 库存大盘 -----------------
 with tab1:
@@ -99,7 +106,6 @@ with tab1:
         )
 
         if st.button("💾 保存所有修改"):
-            # 只提取原始核心字段保存
             save_df = edited_df[CORE_COLUMNS]
             save_df.to_csv(DATA_FILE, index=False)
             st.toast("修改已同步至本地数据库！", icon="✅")
