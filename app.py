@@ -33,8 +33,8 @@ if not os.path.exists(DATA_FILE):
 # 读取原始数据
 df = pd.read_csv(DATA_FILE)
 
-# 3. 页面标签切换
-tab1, tab2, tab3 = st.tabs(["📊 库存大盘 (支持编辑)", "➕ 录入新调料", "🔍 智能搜索"])
+# 3. 页面标签切换（新增了第4个Tab：扔垃圾）
+tab1, tab2, tab3, tab4 = st.tabs(["📊 库存大盘", "➕ 录入调料", "🔍 智能搜索", "🗑️ 清理过期"])
 
 # --- 计算逻辑函数 ---
 def process_data(input_df):
@@ -45,7 +45,7 @@ def process_data(input_df):
         today = pd.to_datetime(datetime.date.today())
         temp_df["剩余天数"] = (temp_df["到期日"] - today).dt.days
         
-        # 【全新逻辑】生成红黄绿状态指示灯
+        # 生成红黄绿状态指示灯
         def get_status(days):
             if days < 0: return "🔴 已过期"
             elif days <= 30: return "🟡 临期"
@@ -81,13 +81,13 @@ with tab1:
 
         st.subheader("📦 详细清单 (双击格子可直接编辑)")
         
-        # 数据编辑器（彻底放弃 CSS，用原生配置）
+        # 数据编辑器
         edited_df = st.data_editor(
-            display_df,  # 不再使用 .style
+            display_df, 
             column_config={
-                "状态": st.column_config.TextColumn("状态", disabled=True), # 锁定状态栏，不准编辑
-                "剩余天数": st.column_config.NumberColumn("剩余天数", format="%d 天", disabled=True), # 锁定计算结果
-                "到期日": st.column_config.TextColumn("到期日", disabled=True), # 锁定计算结果
+                "状态": st.column_config.TextColumn("状态", disabled=True), 
+                "剩余天数": st.column_config.NumberColumn("剩余天数", format="%d 天", disabled=True), 
+                "到期日": st.column_config.TextColumn("到期日", disabled=True), 
                 "照片路径": st.column_config.ImageColumn("预览图"),
             },
             hide_index=True,
@@ -96,7 +96,6 @@ with tab1:
         )
 
         if st.button("💾 保存所有修改"):
-            # 只提取你要的核心数据保存，不会把“状态灯”污染进你的本地 CSV 数据库
             save_df = edited_df[CORE_COLUMNS]
             save_df.to_csv(DATA_FILE, index=False)
             st.toast("修改已同步至本地数据库！", icon="✅")
@@ -148,10 +147,54 @@ with tab3:
             st.warning(f"没找到包含“{query}”的调料。")
         else:
             st.success(f"为您找到 {len(results)} 件匹配项：")
-            # 搜索结果也用同样的组件展示，保持体验一致
             st.dataframe(
                 results, 
                 column_config={"照片路径": st.column_config.ImageColumn("预览")}, 
                 use_container_width=True,
                 hide_index=True
             )
+
+# ----------------- Tab 4: 扔垃圾啦 (全新功能) -----------------
+with tab4:
+    st.subheader("🗑️ 清理过期与空瓶")
+    st.write("当你把厨房里的实体调料扔掉后，别忘了在这里把它从系统中抹除。")
+    
+    if df.empty:
+        st.info("目前厨房空空如也，无需清理！")
+    else:
+        # 获取带有最新“状态灯”的数据
+        del_display_df = process_data(df)
+        
+        # 智能提示：统计有多少过期调料
+        expired_df = del_display_df[del_display_df["剩余天数"] < 0]
+        if not expired_df.empty:
+            st.error(f"🚨 警告：系统检测到你有 {len(expired_df)} 瓶调料已经过期，建议优先清理！")
+            
+        # 构造下拉菜单选项（带着红黄绿灯，方便你一眼看穿谁过期了）
+        delete_options = []
+        for idx in df.index: 
+            name = df.loc[idx, '调料名称']
+            loc = df.loc[idx, '存放位置']
+            status = del_display_df.loc[idx, '状态'] 
+            # 格式： 0 - 海天生抽 (灶台旁边) [🔴 已过期]
+            delete_options.append(f"{idx} - {name} ({loc}) [{status}]")
+        
+        item_to_delete = st.selectbox("请选择你要彻底删除的记录：", delete_options)
+        
+        # 标红的危险按钮
+        if st.button("🚨 确认删除 (此操作不可恢复)", type="primary", use_container_width=True):
+            # 提取真正的行号
+            row_idx = int(item_to_delete.split(" - ")[0])
+            
+            # 贴心细节：顺手把当初存的图片文件也删了，给服务器省空间！
+            img_path = df.loc[row_idx, "照片路径"]
+            if pd.notna(img_path) and img_path != "" and os.path.exists(str(img_path)):
+                os.remove(str(img_path))
+                
+            # 在数据表中删除该行并保存
+            df = df.drop(row_idx).reset_index(drop=True)
+            df.to_csv(DATA_FILE, index=False)
+            
+            # 轻弹窗提示并刷新
+            st.toast("🗑️ 成功将它清理出局！", icon="🧹")
+            st.rerun()
