@@ -4,7 +4,7 @@ import pandas as pd
 import os
 
 # 1. 页面基础配置
-st.set_page_config(page_title="厨房管家", page_icon="🍳", layout="wide")
+st.set_page_config(page_title="厨房调料管家", page_icon="🍳", layout="wide")
 
 st.markdown("""
     <style>
@@ -59,7 +59,8 @@ with tab1:
         
         # 顶部看板
         expired_count = len(display_df[display_df["剩余天数"] < 0])
-        warning_count = len(display_df[(display_df["剩余天数"] >= 0) & (display_df["剩余天_数"] <= 30)])
+        # 【已修复】修改了这里的拼写错误
+        warning_count = len(display_df[(display_df["剩余天数"] >= 0) & (display_df["剩余天数"] <= 30)])
         
         c1, c2, c3 = st.columns(3)
         c1.metric("🟢 安全可用", f"{len(display_df)-expired_count-warning_count} 瓶")
@@ -83,7 +84,6 @@ with tab1:
         # 检查是否有改动并保存
         if st.button("💾 保存表格中的修改"):
             # 将编辑后的数据中，属于核心字段的部分保存回 CSV
-            # 注意：只保存录入时的原始字段，不保存计算出来的“剩余天数”
             save_df = edited_df[CORE_COLUMNS]
             save_df.to_csv(DATA_FILE, index=False)
             st.toast("数据保存成功！", icon="✅")
@@ -116,7 +116,7 @@ with tab2:
             else:
                 st.error("请填写名称")
 
-# ----------------- Tab 3: 智能搜索 (解决白糖搜不到白砂糖的问题) -----------------
+# ----------------- Tab 3: 智能搜索 -----------------
 with tab3:
     st.subheader("🔍 智能模糊搜索")
     query = st.text_input("搜一搜 (支持拆分关键词，如输入‘白糖’也可搜到‘白砂糖’)")
@@ -126,7 +126,6 @@ with tab3:
         def smart_match(target_name, search_query):
             target_name = str(target_name).lower()
             search_query = str(search_query).lower()
-            # 只要搜索词里的字都在目标里，就返回 True
             return all(char in target_name for char in search_query)
 
         search_display = process_data(df)
