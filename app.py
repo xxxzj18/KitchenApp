@@ -3,27 +3,23 @@ import datetime
 import pandas as pd
 import os
 
-# 1. 页面基础配置与 CSS 魔法（美化核心）
-st.set_page_config(page_title="厨房调料管家", page_icon="🍳", layout="wide")
+# 1. 页面基础配置
+st.set_page_config(page_title="厨房管家", page_icon="🍳", layout="wide")
 
-# 注入自定义 CSS 来美化看板和按钮
 st.markdown("""
     <style>
-    /* 美化顶部数据看板，加圆角和阴影 */
     div[data-testid="metric-container"] {
         background-color: #f7f9fc;
         border: 1px solid #e1e4e8;
         padding: 15px 20px;
         border-radius: 12px;
-        box-shadow: 2px 2px 8px rgba(0,0,0,0.04);
     }
-    /* 隐藏默认的底部 Streamlit 水印 */
     footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🍳 厨房管家")
-st.caption("目标：告别混乱，还我厨房清净！✨")
+st.title("🍳 厨房调料管家 3.0")
+st.caption("支持智能模糊搜索、直接在线编辑数据 ✨")
 
 # 2. 数据库与文件夹初始化
 DATA_FILE = "kitchen_data.csv"
@@ -34,118 +30,111 @@ if not os.path.exists(PHOTO_DIR): os.makedirs(PHOTO_DIR)
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=CORE_COLUMNS).to_csv(DATA_FILE, index=False)
 
+# 读取数据
 df = pd.read_csv(DATA_FILE)
 
-# 【美化大招】使用 Tabs 选项卡分割页面结构
-tab1, tab2, tab3 = st.tabs(["📊 库存大盘", "➕ 录入与搜索", "🗑️ 扔垃圾啦"])
+# 3. 页面标签切换
+tab1, tab2, tab3 = st.tabs(["📊 库存大盘 (支持编辑)", "➕ 录入新调料", "🔍 智能搜索"])
 
-# ----------------- Tab 1: 库存大盘 -----------------
+# --- 计算逻辑函数 ---
+def process_data(input_df):
+    temp_df = input_df.copy()
+    if not temp_df.empty:
+        # 确保日期显示为数字格式: YYYY-MM-DD
+        temp_df["生产日期"] = pd.to_datetime(temp_df["生产日期"])
+        temp_df["到期日"] = temp_df.apply(lambda row: row["生产日期"] + pd.DateOffset(months=int(row["保质期(月)"])), axis=1)
+        today = pd.to_datetime(datetime.date.today())
+        temp_df["剩余天数"] = (temp_df["到期日"] - today).dt.days
+        # 转回全数字字符串
+        temp_df["生产日期"] = temp_df["生产日期"].dt.strftime("%Y-%m-%d")
+        temp_df["到期日"] = temp_df["到期日"].dt.strftime("%Y-%m-%d")
+    return temp_df
+
+# ----------------- Tab 1: 库存大盘 (增加编辑保存功能) -----------------
 with tab1:
     if df.empty:
-        st.info("👋 欢迎！目前厨房空空如也，请前往「录入与搜索」添加你的第一瓶调料！")
+        st.info("目前厨房空空如也。")
     else:
-        # 数据处理与计算
-        display_df = df.copy()
-        display_df["生产日期"] = pd.to_datetime(display_df["生产日期"])
-        display_df["到期日"] = display_df.apply(lambda row: row["生产日期"] + pd.DateOffset(months=int(row["保质期(月)"])), axis=1)
-        today = pd.to_datetime(datetime.date.today())
-        display_df["剩余天数"] = (display_df["到期日"] - today).dt.days
+        display_df = process_data(df)
         
-        display_df["生产日期"] = display_df["生产日期"].dt.strftime("%Y-%m-%d")
-        display_df["到期日"] = display_df.apply(lambda row: row["到期日"].strftime("%Y-%m-%d"), axis=1)
-
         # 顶部看板
         expired_count = len(display_df[display_df["剩余天数"] < 0])
-        warning_count = len(display_df[(display_df["剩余天数"] >= 0) & (display_df["剩余天数"] <= 30)])
-        safe_count = len(display_df) - expired_count - warning_count
+        warning_count = len(display_df[(display_df["剩余天数"] >= 0) & (display_df["剩余天_数"] <= 30)])
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("🟢 安全可用", f"{safe_count} 瓶", "保质期 > 30天")
-        c2.metric("🟡 临期预警", f"{warning_count} 瓶", "-30天内到期")
-        c3.metric("🔴 毒药警告", f"{expired_count} 瓶", "已过期，快扔！")
-        
-        st.write("---")
-        
-        # 优化表格展示
-        def highlight_rows(row):
-            if row['剩余天数'] < 0: return ['background-color: #ffcccc; color: #a30000'] * len(row)
-            elif row['剩余天数'] <= 30: return ['background-color: #fff3cd; color: #856404'] * len(row)
-            return [''] * len(row)
+        c1.metric("🟢 安全可用", f"{len(display_df)-expired_count-warning_count} 瓶")
+        c2.metric("🟡 临期预警", f"{warning_count} 瓶")
+        c3.metric("🔴 毒药警告", f"{expired_count} 瓶")
 
-        st.subheader("📦 详细清单")
-        st.data_editor(
-            display_df.style.apply(highlight_rows, axis=1),
-            column_config={"照片路径": st.column_config.ImageColumn("调料照片")},
-            hide_index=True, use_container_width=True, disabled=True, height=500
+        st.subheader("📦 详细清单 (双击格子可直接修改)")
+        
+        # 使用 data_editor 让表格变得可以编辑
+        edited_df = st.data_editor(
+            display_df,
+            column_config={
+                "照片路径": st.column_config.ImageColumn("预览图"),
+                "剩余天数": st.column_config.NumberColumn("剩余天数", format="%d 天"),
+            },
+            hide_index=False, # 显示索引方便对应
+            use_container_width=True,
+            num_rows="dynamic" # 允许在表格里直接删除行
         )
 
-# ----------------- Tab 2: 录入与搜索 -----------------
-with tab2:
-    col_search, col_add = st.columns([1, 1.5], gap="large")
-    
-    with col_search:
-        st.subheader("🔍 去超市前搜一搜")
-        st.info("在超市不知道家里有没有？搜一下防重买！")
-        search_term = st.text_input("输入调料名称：", placeholder="例如：黄油、生抽...")
-        
-        if search_term and not df.empty:
-            search_res = df[df["调料名称"].str.contains(search_term, na=False)]
-            if search_res.empty:
-                st.success(f"家里没有找到关于【{search_term}】的调料，放心买！")
-            else:
-                st.warning(f"家里已经有 {len(search_res)} 份关于【{search_term}】的调料啦！别多买！")
-                st.dataframe(search_res[["调料名称", "存放位置"]], hide_index=True, use_container_width=True)
-
-    with col_add:
-        st.subheader("➕ 刚买回来的新调料")
-        with st.form("my_form", clear_on_submit=True):
-            name = st.text_input("调料名称*", placeholder="必填...")
-            uploaded_file = st.file_uploader("拍照留档 (选填)", type=["jpg", "jpeg", "png"])
-            
-            c_date, c_life = st.columns(2)
-            produce_date = c_date.date_input("生产日期", datetime.date.today())
-            shelf_life = c_life.number_input("保质期(个月)", min_value=1, value=12)
-            
-            c_loc, c_cat = st.columns(2)
-            location = c_loc.selectbox("放哪里了？", ["灶台旁边", "冰箱冷藏", "冰箱冷冻", "吊柜上层", "吊柜下层", "角落纸箱"])
-            category = c_cat.selectbox("分个类吧", ["日常调味品", "酱料/调味汁", "烘焙辅料", "干货/香料", "其他"])
-            
-            submitted = st.form_submit_button("💾 保存到我的厨房", use_container_width=True)
-            
-            if submitted:
-                if name == "":
-                    st.error("⚠️ 调料名称不能为空哦！")
-                else:
-                    img_path = ""
-                    if uploaded_file is not None:
-                        img_path = os.path.join(PHOTO_DIR, f"{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png")
-                        with open(img_path, "wb") as f: f.write(uploaded_file.getbuffer())
-                    
-                    new_data = pd.DataFrame({"调料名称": [name], "生产日期": [produce_date], "保质期(月)": [shelf_life], "存放位置": [location], "分类": [category], "照片路径": [img_path]})
-                    df = pd.concat([df, new_data], ignore_index=True)
-                    df[CORE_COLUMNS].to_csv(DATA_FILE, index=False)
-                    # 【美化大招】使用不干扰画面的 Toast 提示
-                    st.toast(f"✅ 【{name}】已成功入库！", icon="🎉")
-                    st.rerun()
-
-# ----------------- Tab 3: 扔垃圾啦 -----------------
-with tab3:
-    st.subheader("🗑️ 清理过期物品")
-    st.write("把那些红色的过期调料扔进垃圾桶后，记得在这里把它删掉哦。")
-    
-    if df.empty:
-        st.info("太棒了，目前没有什么需要清理的！")
-    else:
-        delete_list = [f"{i}: {n} (在 {l})" for i, n, l in zip(df.index, df["调料名称"], df["存放位置"])]
-        item_to_delete = st.selectbox("选择你要从系统中删掉的物品：", delete_list)
-        
-        if st.button("🚨 确认删除 (此操作不可恢复)", type="primary"):
-            idx = int(item_to_delete.split(":")[0])
-            old_path = df.loc[idx, "照片路径"]
-            if pd.notna(old_path) and old_path != "" and os.path.exists(str(old_path)):
-                os.remove(str(old_path))
-            
-            df = df.drop(idx).reset_index(drop=True)
-            df[CORE_COLUMNS].to_csv(DATA_FILE, index=False)
-            st.toast("🗑️ 已清理出局！", icon="🧹")
+        # 检查是否有改动并保存
+        if st.button("💾 保存表格中的修改"):
+            # 将编辑后的数据中，属于核心字段的部分保存回 CSV
+            # 注意：只保存录入时的原始字段，不保存计算出来的“剩余天数”
+            save_df = edited_df[CORE_COLUMNS]
+            save_df.to_csv(DATA_FILE, index=False)
+            st.toast("数据保存成功！", icon="✅")
             st.rerun()
+
+# ----------------- Tab 2: 录入新调料 -----------------
+with tab2:
+    st.subheader("➕ 录入新成员")
+    with st.form("add_form", clear_on_submit=True):
+        name = st.text_input("调料名称*")
+        uploaded_file = st.file_uploader("拍照", type=["jpg", "png", "jpeg"])
+        c1, c2 = st.columns(2)
+        p_date = c1.date_input("生产日期", datetime.date.today())
+        s_life = c2.number_input("保质期(个月)", min_value=1, value=12)
+        loc = st.selectbox("位置", ["灶台旁边", "冰箱冷藏", "冰箱冷冻", "吊柜上层", "吊柜下层", "角落纸箱"])
+        cat = st.selectbox("分类", ["日常调味品", "酱料/调味汁", "烘焙辅料", "干货/香料", "其他"])
+        
+        if st.form_submit_button("保存", use_container_width=True):
+            if name:
+                path = ""
+                if uploaded_file:
+                    path = os.path.join(PHOTO_DIR, f"{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png")
+                    with open(path, "wb") as f: f.write(uploaded_file.getbuffer())
+                
+                new_line = pd.DataFrame([[name, p_date, s_life, loc, cat, path]], columns=CORE_COLUMNS)
+                df = pd.concat([df, new_line], ignore_index=True)
+                df.to_csv(DATA_FILE, index=False)
+                st.toast(f"已存入 {name}")
+                st.rerun()
+            else:
+                st.error("请填写名称")
+
+# ----------------- Tab 3: 智能搜索 (解决白糖搜不到白砂糖的问题) -----------------
+with tab3:
+    st.subheader("🔍 智能模糊搜索")
+    query = st.text_input("搜一搜 (支持拆分关键词，如输入‘白糖’也可搜到‘白砂糖’)")
+    
+    if query and not df.empty:
+        # 智能匹配逻辑：检查查询词中的每一个字是否都在名称中出现
+        def smart_match(target_name, search_query):
+            target_name = str(target_name).lower()
+            search_query = str(search_query).lower()
+            # 只要搜索词里的字都在目标里，就返回 True
+            return all(char in target_name for char in search_query)
+
+        search_display = process_data(df)
+        mask = search_display["调料名称"].apply(lambda x: smart_match(x, query))
+        results = search_display[mask]
+        
+        if results.empty:
+            st.warning(f"没搜到包含“{query}”的调料。")
+        else:
+            st.success(f"为您找到 {len(results)} 件匹配项：")
+            st.dataframe(results, column_config={"照片路径": st.column_config.ImageColumn("预览")}, use_container_width=True)
