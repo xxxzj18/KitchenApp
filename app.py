@@ -18,7 +18,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 【已更新】你指定的最终产品标题
 st.title("🍳 厨房管家")
 st.caption("告别杂乱，享受美妙厨房 ✨")
 
@@ -46,29 +45,22 @@ def process_data(input_df):
         today = pd.to_datetime(datetime.date.today())
         temp_df["剩余天数"] = (temp_df["到期日"] - today).dt.days
         
+        # 【全新逻辑】生成红黄绿状态指示灯
+        def get_status(days):
+            if days < 0: return "🔴 已过期"
+            elif days <= 30: return "🟡 临期"
+            return "🟢 安全"
+        
+        temp_df["状态"] = temp_df["剩余天数"].apply(get_status)
+        
         temp_df["生产日期"] = temp_df["生产日期"].dt.strftime("%Y-%m-%d")
         temp_df["到期日"] = temp_df["到期日"].dt.strftime("%Y-%m-%d")
         
-        # 调整列顺序
-        new_order = ["调料名称", "生产日期", "剩余天数", "到期日", "保质期(月)", "存放位置", "分类", "照片路径"]
+        # 将“状态”灯放在第一列，一目了然
+        new_order = ["状态", "调料名称", "生产日期", "剩余天数", "到期日", "保质期(月)", "存放位置", "分类", "照片路径"]
         temp_df = temp_df[new_order]
         
     return temp_df
-
-# --- 【全新强力修复】精准全局上色魔法 ---
-def apply_color(df_to_style):
-    # 创建一个和表格一模一样大的“透明画布”
-    styles = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-    
-    # 找到哪些行过期了，哪些行临期了
-    mask_expired = df_to_style['剩余天数'] < 0
-    mask_warning = (df_to_style['剩余天数'] >= 0) & (df_to_style['剩余天数'] <= 30)
-    
-    # 在“调料名称”这一列的对应位置，刷上颜色并加粗
-    styles.loc[mask_expired, '调料名称'] = 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
-    styles.loc[mask_warning, '调料名称'] = 'background-color: #fff3cd; color: #856404; font-weight: bold;'
-    
-    return styles
 
 # ----------------- Tab 1: 库存大盘 -----------------
 with tab1:
@@ -89,12 +81,14 @@ with tab1:
 
         st.subheader("📦 详细清单 (双击格子可直接编辑)")
         
-        # 数据编辑器，使用新的 axis=None 渲染法
+        # 数据编辑器（彻底放弃 CSS，用原生配置）
         edited_df = st.data_editor(
-            display_df.style.apply(apply_color, axis=None),
+            display_df,  # 不再使用 .style
             column_config={
+                "状态": st.column_config.TextColumn("状态", disabled=True), # 锁定状态栏，不准编辑
+                "剩余天数": st.column_config.NumberColumn("剩余天数", format="%d 天", disabled=True), # 锁定计算结果
+                "到期日": st.column_config.TextColumn("到期日", disabled=True), # 锁定计算结果
                 "照片路径": st.column_config.ImageColumn("预览图"),
-                "剩余天数": st.column_config.NumberColumn("剩余天数", format="%d 天"),
             },
             hide_index=True,
             use_container_width=True,
@@ -102,6 +96,7 @@ with tab1:
         )
 
         if st.button("💾 保存所有修改"):
+            # 只提取你要的核心数据保存，不会把“状态灯”污染进你的本地 CSV 数据库
             save_df = edited_df[CORE_COLUMNS]
             save_df.to_csv(DATA_FILE, index=False)
             st.toast("修改已同步至本地数据库！", icon="✅")
@@ -153,8 +148,9 @@ with tab3:
             st.warning(f"没找到包含“{query}”的调料。")
         else:
             st.success(f"为您找到 {len(results)} 件匹配项：")
+            # 搜索结果也用同样的组件展示，保持体验一致
             st.dataframe(
-                results.style.apply(apply_color, axis=None), 
+                results, 
                 column_config={"照片路径": st.column_config.ImageColumn("预览")}, 
                 use_container_width=True,
                 hide_index=True
